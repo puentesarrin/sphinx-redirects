@@ -13,9 +13,17 @@
 import os
 
 from sphinx.builders import html as builders
+from sphinx.locale import __
+from sphinx.util import status_iterator
 
 TEMPLATE = """<html>
-  <head><meta http-equiv="refresh" content="0; url=%s"/></head>
+  <head><meta http-equiv="refresh" content="0; url={to_path}"/></head>
+  <body>
+  This page has moved. Redirecting...
+  <script>
+  window.location.href = '{to_path}' + (window.location.search || '') + (window.location.hash || '');
+  </script>
+  </body>
 </html>
 """
 
@@ -27,7 +35,14 @@ def generate_redirects(app):
         app.info("Could not find redirects file at '%s'" % path)
         return
 
-    in_suffix = app.config.source_suffix[0]
+
+    if isinstance(app.config.source_suffix, list):
+        in_suffix = app.config.source_suffix[0]
+    elif isinstance(app.config.source_suffix, dict):
+        in_suffix = list(app.config.source_suffix.keys())[0]
+    else:
+        app.warn("The source suffix can not be resolved. Skipping redirects...")
+        return
 
     # TODO(stephenfin): Add support for DirectoryHTMLBuilder
     if not type(app.builder) == builders.StandaloneHTMLBuilder:
@@ -35,24 +50,24 @@ def generate_redirects(app):
                  "by the 'html' builder. Skipping...")
         return
 
-    with open(path) as redirects:
-        for line in redirects.readlines():
-            from_path, to_path = line.rstrip().split(' ')
+    with open(path) as redirects_file:
+        redirects = dict([line.rstrip().split(' ') for line in redirects_file.readlines()])
 
-            app.debug("Redirecting '%s' to '%s'" % (from_path, to_path))
+    for from_path in status_iterator(redirects.keys(), __('creating redirects'), 'blue', len(redirects),
+                                     app.verbosity):
+        to_path = redirects[from_path]
+        from_path = '{}{}'.format(from_path[:len(in_suffix) * -1], '.html')
+        to_path_prefix = '..%s' % os.path.sep * (
+            len(from_path.split(os.path.sep)) - 1)
+        to_path = to_path_prefix + to_path.replace(in_suffix, '.html')
 
-            from_path = from_path.replace(in_suffix, '.html')
-            to_path_prefix = '..%s' % os.path.sep * (
-                len(from_path.split(os.path.sep)) - 1)
-            to_path = to_path_prefix + to_path.replace(in_suffix, '.html')
+        redirected_filename = os.path.join(app.builder.outdir, from_path)
+        redirected_directory = os.path.dirname(redirected_filename)
+        if not os.path.exists(redirected_directory):
+            os.makedirs(redirected_directory)
 
-            redirected_filename = os.path.join(app.builder.outdir, from_path)
-            redirected_directory = os.path.dirname(redirected_filename)
-            if not os.path.exists(redirected_directory):
-                os.makedirs(redirected_directory)
-
-            with open(redirected_filename, 'w') as f:
-                f.write(TEMPLATE % to_path)
+        with open(redirected_filename, 'w') as f:
+            f.write(TEMPLATE.format(to_path=to_path))
 
 
 def setup(app):
